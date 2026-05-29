@@ -1257,9 +1257,9 @@ async function toggleNotifications(){
     ntfyTopic=topic.trim().toLowerCase().replace(/[^a-z0-9-_]/g,"");
     localStorage.setItem("ntfy_topic",ntfyTopic);
     try{
-      await sendNtfy("⚡ Live Scout aktiv","Notifications eingerichtet! Du erhältst Alerts sobald Wettchancen erkannt werden.","tada");
+      await sendNtfy("Live Scout aktiv","Notifications eingerichtet! Du erhältst Alerts sobald Wettchancen erkannt werden.","tada");
       notificationsEnabled=true;
-      alert(`✓ Erfolgreich!\n\nntfy App → Topic abonnieren:\n"${ntfyTopic}"`);
+      alert(`Erfolgreich!\n\nntfy App -> Topic abonnieren:\n"${ntfyTopic}"`);
     }catch(e){alert("⚠ ntfy Fehler: "+e.message);return;}
   } else {
     ntfyTopic="";localStorage.removeItem("ntfy_topic");
@@ -1272,7 +1272,19 @@ async function toggleNotifications(){
 
 async function sendNtfy(title,body,tags="soccer"){
   if(!ntfyTopic) return;
-  await fetch(`https://ntfy.sh/${ntfyTopic}`,{method:"POST",headers:{"Title":title,"Tags":tags,"Priority":"high","Content-Type":"text/plain"},body});
+  // Strip non-ASCII characters from headers (ISO-8859-1 requirement)
+  const safeTitle=title.replace(/[^\x00-\x7F]/g,"").trim()||"Live Scout Alert";
+  const safeTags=tags.replace(/[^\x00-\x7F]/g,"").trim()||"soccer";
+  await fetch(`https://ntfy.sh/${ntfyTopic}`,{
+    method:"POST",
+    headers:{
+      "Title": safeTitle,
+      "Tags": safeTags,
+      "Priority": "high",
+      "Content-Type": "text/plain; charset=utf-8",
+    },
+    body: new TextEncoder().encode(body)
+  });
 }
 
 async function sendAlert(match,trigger){
@@ -1290,7 +1302,7 @@ async function sendAlert(match,trigger){
   const bestO=bestOdd(trigger.oddsData);
   const oddsText=bestO?` | Quote ${bestO.odd.toFixed(2)}`:"";
   const vsText=trigger.valueScore?` | Score ${trigger.valueScore}/100`:"";
-  const title=`${trigger.scenario.label} – ${hN} vs ${aN}`;
+  const title=`${hN} vs ${aN} – ${trigger.scenario.id.replace(/_/g," ")}`;
   const body=`${hG}:${aG} (${min}') | ${league}\n${trigger.recBet}${oddsText}${vsText}`;
   if(ntfyTopic) await sendNtfy(title,body,"soccer,warning");
   else if(Notification.permission==="granted"){const n=new Notification(title,{body,tag:key});setTimeout(()=>n.close(),8000);}
@@ -1311,8 +1323,8 @@ async function sendFreeAlert(match){
   const oddsText=bestO?` | Quote ${bestO.odd.toFixed(2)}`:"";
   const vsText=match.freeRec.valueScore?` | Score ${match.freeRec.valueScore}/100`:"";
   const body=`${hG}:${aG} (${min}')\n${match.freeRec.bet}${oddsText}${vsText}`;
-  if(ntfyTopic) await sendNtfy(`💡 KI Tipp – ${hN} vs ${aN}`,body,"bulb,soccer");
-  else if(Notification.permission==="granted"){const n=new Notification(`💡 KI Tipp – ${hN} vs ${aN}`,{body,tag:key});setTimeout(()=>n.close(),8000);}
+  if(ntfyTopic) await sendNtfy(`KI Tipp – ${hN} vs ${aN}`,body,"bulb,soccer");
+  else if(Notification.permission==="granted"){const n=new Notification(`KI Tipp – ${hN} vs ${aN}`,{body,tag:key});setTimeout(()=>n.close(),8000);}
 }
 
 function cleanupNotified(){
