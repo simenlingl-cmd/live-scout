@@ -366,7 +366,9 @@ function getStat(arr,type){
   if(v==null||v==="") return 0;
   return parseInt(String(v).replace("%",""))||0;
 }
-function oddsClass(o){return o>=1.8?"good":o>=1.5?"ok":"low"}
+function safeFixed(v,d=1){return(parseFloat(v)||0).toFixed(d)}
+
+
 function oddsVerdict(o){
   if(o>=1.8) return{cls:"good",text:"✓ Guter Value"};
   if(o>=1.5) return{cls:"ok",text:"~ Akzeptabel"};
@@ -875,10 +877,10 @@ async function loadPreMatch(){
       const {fix,h2h,homeTeamStats,awayTeamStats,injuries,predictions,referee}=d;
       const homeName=safeGet(fix,"teams","home","name")||"?";
       const awayName=safeGet(fix,"teams","away","name")||"?";
-      const hGoalsAvg=safeGet(homeTeamStats,"goals","for","average","total")||0;
-      const aGoalsAvg=safeGet(awayTeamStats,"goals","for","average","total")||0;
-      const hConcAvg=safeGet(homeTeamStats,"goals","against","average","total")||0;
-      const aConcAvg=safeGet(awayTeamStats,"goals","against","average","total")||0;
+      const hGoalsAvg=parseFloat(safeGet(homeTeamStats,"goals","for","average","total")||0)||0;
+      const aGoalsAvg=parseFloat(safeGet(awayTeamStats,"goals","for","average","total")||0)||0;
+      const hConcAvg=parseFloat(safeGet(homeTeamStats,"goals","against","average","total")||0)||0;
+      const aConcAvg=parseFloat(safeGet(awayTeamStats,"goals","against","average","total")||0)||0;
       const hHomeWin=safeGet(homeTeamStats,"fixtures","wins","home")||0;
       const hHomePlayed=safeGet(homeTeamStats,"fixtures","played","home")||1;
       const hForm=parseForm(safeGet(homeTeamStats,"form")||"");
@@ -910,7 +912,7 @@ async function loadPreMatch(){
       if(homeWinRate>=0.7&&hGoalsAvg>=1.8){
         pmScenarios.push({sc:PM_SC.HOME_FORTRESS,
           bet:`${homeName} Sieg`,
-          reason:`${homeName} gewinnt ${Math.round(homeWinRate*100)}% der Heimspiele bei ${hGoalsAvg.toFixed(1)} Toren/Spiel.`,
+          reason:`${homeName} gewinnt ${Math.round(homeWinRate*100)}% der Heimspiele bei ${safeFixed(hGoalsAvg)} Toren/Spiel.`,
           valueScore:calcValueScore(1.8,homeWinRate,hFS*1.5,h2hOver*3,10)});
       }
 
@@ -930,7 +932,7 @@ async function loadPreMatch(){
       if(combinedGoals>=5&&h2hOver>=3){
         pmScenarios.push({sc:PM_SC.GOAL_FEST,
           bet:`Over 2.5 Tore · BTTS–Ja`,
-          reason:`Kombinierter Tordurchschnitt: ${combinedGoals.toFixed(1)} Tore. H2H Over 2.5: ${h2hOver}/6 Spielen.`,
+          reason:`Kombinierter Tordurchschnitt: ${safeFixed(combinedGoals)} Tore. H2H Over 2.5: ${h2hOver}/6 Spielen.`,
           valueScore:calcValueScore(1.65,0.75,0,h2hOver*5,8)});
       }
 
@@ -1033,7 +1035,7 @@ function renderPreMatch(data){
       <div class="pm-stat">
         <div class="pm-stat-label">Ø Tore</div>
         <div class="pm-stat-value ${parseFloat(d.hGoalsAvg)+parseFloat(d.aGoalsAvg)>3?"good":""}">
-          ${parseFloat(d.hGoalsAvg).toFixed(1)} / ${parseFloat(d.aGoalsAvg).toFixed(1)}
+          ${safeFixed(d.hGoalsAvg,1)} / ${safeFixed(d.aGoalsAvg,1)}
         </div>
       </div>
       <div class="pm-stat">
