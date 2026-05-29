@@ -293,6 +293,12 @@
 <div id="view-prematch">
 <div id="prematch-wrap">
   <button class="pm-load-btn" onclick="loadPreMatch()">🔭 Heutige Spiele analysieren</button>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap" id="pm-filters">
+    <button class="hist-filter active" onclick="setPmFilter('all',this)">Alle</button>
+    <button class="hist-filter" onclick="setPmFilter('bet365',this)">✓ Bet365</button>
+    <button class="hist-filter" onclick="setPmFilter('value',this)">💰 Value ≥60</button>
+    <button class="hist-filter" onclick="setPmFilter('nobm',this)">⚠ Kein Bet365</button>
+  </div>
   <div id="pm-status"></div>
   <div id="pm-top3"></div>
   <div id="pm-list"></div>
@@ -812,18 +818,113 @@ async function fetchStandings(leagueId,season){
 
 function renderStandingsTable(standings,homeId,awayId){
   if(!standings||!standings.length) return`<div class="standings-loading">Keine Tabellendaten</div>`;
-  return`<table class="standings-table"><thead><tr><th>Team</th><th>Sp</th><th>S</th><th>U</th><th>N</th><th>Tore</th><th>Pkt</th></tr></thead>
+  return`<table class="standings-table"><thead><tr><th>Team</th><th>Sp</th><th>S</th><th>U</th><th>N</th><th>Tor+</th><th>Tor-</th><th>Diff</th><th>Pkt</th></tr></thead>
   <tbody>${standings.map((row,i)=>{
     const hi=row.team?.id===homeId||row.team?.id===awayId;
-    const gf=safeGet(row,"all","goals","for")??"-",ga=safeGet(row,"all","goals","against")??"-";
-    return`<tr class="${hi?"highlighted":""}"><td><span class="pos-num">${row.rank||i+1}</span><span class="team-name-cell">${row.team?.name||"?"}</span></td>
-    <td>${safeGet(row,"all","played")??0}</td><td>${safeGet(row,"all","win")??0}</td><td>${safeGet(row,"all","draw")??0}</td><td>${safeGet(row,"all","lose")??0}</td>
-    <td><span class="gf">${gf}</span>:<span class="ga">${ga}</span></td><td class="pts-cell">${row.points??"-"}</td></tr>`;
+    const gf=safeGet(row,"all","goals","for")??0;
+    const ga=safeGet(row,"all","goals","against")??0;
+    const diff=gf-ga;
+    const diffColor=diff>0?"#22c55e":diff<0?"#ef4444":"#666";
+    return`<tr class="${hi?"highlighted":""}">
+      <td><span class="pos-num">${row.rank||i+1}</span><span class="team-name-cell">${row.team?.name||"?"}</span></td>
+      <td>${safeGet(row,"all","played")??0}</td>
+      <td>${safeGet(row,"all","win")??0}</td>
+      <td>${safeGet(row,"all","draw")??0}</td>
+      <td>${safeGet(row,"all","lose")??0}</td>
+      <td><span class="gf">${gf}</span></td>
+      <td><span class="ga">${ga}</span></td>
+      <td style="color:${diffColor};font-weight:700">${diff>0?"+":""}${diff}</td>
+      <td class="pts-cell">${row.points??"-"}</td>
+    </tr>`;
   }).join("")}</tbody></table>`;
 }
 
-// ─── PRE-MATCH ENGINE ────────────────────────────────────────────────────────
-async function loadPreMatch(){
+// Known bookmaker IDs in API-Football
+const KNOWN_BOOKMAKERS = {
+  1:  "William Hill",
+  2:  "Bwin",
+  3:  "Unibet",
+  4:  "Betclic",
+  5:  "Betway",
+  6:  "10Bet",
+  7:  "Betsson",
+  8:  "Bet365",
+  9:  "Marathon Bet",
+  10: "Bet Victor",
+  11: "Ladbrokes",
+  12: "Coral",
+  13: "Paddy Power",
+  14: "Sky Bet",
+  15: "Sportingbet",
+  16: "888Sport",
+  17: "Betfair",
+  18: "Pinnacle",
+  19: "Interwetten",
+  20: "Tipico",
+};
+
+// Bookmakers relevant for German market (in priority order)
+const DE_RELEVANT_BOOKMAKERS = [8,2,3,16,5,17,1,11];
+const DE_RELEVANT_NAMES = {8:"Bet365",2:"Bwin",3:"Unibet",16:"888Sport",5:"Betway",17:"Betfair",1:"William Hill",11:"Ladbrokes"};
+
+function analyzeBookmakers(pmOdds){
+  if(!pmOdds||!pmOdds.length) return{hasBet365:false,availableIds:[],bestAlternative:null,allNames:[]};
+  // pmOdds is array of bookmaker objects with id and bets
+  const availableIds=pmOdds.map(b=>b.id);
+  const hasBet365=availableIds.includes(BOOKMAKER_ID);
+  const allNames=pmOdds.map(b=>KNOWN_BOOKMAKERS[b.id]||`BM#${b.id}`);
+  // Find best DE-relevant alternative
+  const bestAlt=DE_RELEVANT_BOOKMAKERS.filter(id=>id!==BOOKMAKER_ID&&availableIds.includes(id))[0]||null;
+  const bestAltName=bestAlt?DE_RELEVANT_NAMES[bestAlt]:null;
+  // Extract Bet365 odds for 1X2 if available
+  let bet365Odds=null;
+  if(hasBet365){
+    const bm=pmOdds.find(b=>b.id===BOOKMAKER_ID);
+    const match1x2=bm?.bets?.find(b=>b.name==="Match Winner");
+    if(match1x2){
+      const h=match1x2.values?.find(v=>v.value==="Home");
+      const d=match1x2.values?.find(v=>v.value==="Draw");
+      const a=match1x2.values?.find(v=>v.value==="Away");
+      bet365Odds={home:h?parseFloat(h.odd):null,draw:d?parseFloat(d.odd):null,away:a?parseFloat(a.odd):null};
+    }
+  }
+  return{hasBet365,availableIds,bestAlternative:bestAltName,allNames,bet365Odds};
+}
+
+
+let pmFilter="all";
+function setPmFilter(f,btn){
+  pmFilter=f;
+  document.querySelectorAll("#pm-filters .hist-filter").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  if(allPmData.length) renderPreMatch(allPmData);
+}
+
+function renderBookmakerSummary(data){
+  const total=data.length;
+  const withBet365=data.filter(d=>analyzeBookmakers(d.pmOdds).hasBet365).length;
+  const withAnyOdds=data.filter(d=>d.pmOdds&&d.pmOdds.length>0).length;
+  const withNone=total-withAnyOdds;
+
+  // Count alternative bookmakers
+  const bmCounts={};
+  data.forEach(d=>{
+    (d.pmOdds||[]).forEach(bm=>{
+      if(bm.id!==BOOKMAKER_ID) bmCounts[bm.id]=(bmCounts[bm.id]||0)+1;
+    });
+  });
+  const topAlts=Object.entries(bmCounts).sort((a,b)=>b[1]-a[1]).slice(0,3)
+    .map(([id,cnt])=>`${KNOWN_BOOKMAKERS[id]||`BM#${id}`}: ${cnt}`).join(" · ");
+
+  return`<div style="background:#111;border:1px solid #1a1a1a;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-family:'JetBrains Mono',monospace;font-size:11px;display:flex;gap:16px;flex-wrap:wrap">
+    <div>Spiele heute: <span style="color:#f0f0f0;font-weight:700">${total}</span></div>
+    <div>Bet365 verfügbar: <span style="color:${withBet365>0?"#22c55e":"#ef4444"};font-weight:700">${withBet365}/${total}</span></div>
+    <div>Beliebige Quoten: <span style="color:#f59e0b;font-weight:700">${withAnyOdds}/${total}</span></div>
+    ${topAlts?`<div style="color:#444">Alternativ: ${topAlts}</div>`:""}
+  </div>`;
+}
+
+
   const pmStatus=document.getElementById("pm-status");
   const pmTop3=document.getElementById("pm-top3");
   const pmList=document.getElementById("pm-list");
@@ -852,21 +953,23 @@ async function loadPreMatch(){
       const aId=safeGet(fix,"teams","away","id");
       const lid=safeGet(fix,"league","id");
       const season=safeGet(fix,"league","season");
-      let h2h=[],homeTeamStats={},awayTeamStats={},injuries=[],predictions={},referee=safeGet(fix,"fixture","referee")||null;
+      let h2h=[],homeTeamStats={},awayTeamStats={},injuries=[],predictions={},referee=safeGet(fix,"fixture","referee")||null,pmOdds=[];
 
       try{
-        const [h2hRes,htRes,atRes,injRes,predRes]=await Promise.all([
+        const [h2hRes,htRes,atRes,injRes,predRes,oddsRes]=await Promise.all([
           apiFetch(`/fixtures/headtohead?h2h=${hId}-${aId}&last=6`),
           apiFetch(`/teams/statistics?team=${hId}&season=${season}&league=${lid}`),
           apiFetch(`/teams/statistics?team=${aId}&season=${season}&league=${lid}`),
           apiFetch(`/injuries?fixture=${id}`),
           apiFetch(`/predictions?fixture=${id}`),
+          apiFetch(`/odds?fixture=${id}`),
         ]);
         h2h=h2hRes.response||[];
         homeTeamStats=htRes.response||{};
         awayTeamStats=atRes.response||{};
         injuries=injRes.response||[];
         predictions=predRes.response?.[0]||{};
+        pmOdds=oddsRes.response||[];
       }catch{}
 
       return{fix,h2h,homeTeamStats,awayTeamStats,injuries,predictions,referee};
@@ -971,7 +1074,7 @@ async function loadPreMatch(){
 
       return{...d,homeName,awayName,hGoalsAvg,aGoalsAvg,hForm,aForm,hFS,aFS,
         homeWinProb,awayWinProb,drawProb,predWinner,h2hOver,h2hBtts,
-        keyInjuries,refName,pmScenarios,maxVS};
+        keyInjuries,refName,pmScenarios,maxVS,pmOdds};
     });
 
     allPmData=scored;
@@ -988,11 +1091,23 @@ function renderPreMatch(data){
   const pmTop3=document.getElementById("pm-top3");
   const pmList=document.getElementById("pm-list");
 
-  const top3=data.filter(d=>d.maxVS>=60).sort((a,b)=>b.maxVS-a.maxVS).slice(0,3);
+  // Bookmaker summary
+  const bmSummary=renderBookmakerSummary(data);
+
+  // Apply filter
+  const filtered=data.filter(d=>{
+    const bm=analyzeBookmakers(d.pmOdds);
+    if(pmFilter==="bet365") return bm.hasBet365;
+    if(pmFilter==="value") return d.maxVS>=60;
+    if(pmFilter==="nobm") return !bm.hasBet365;
+    return true;
+  });
+
+  const top3=filtered.filter(d=>d.maxVS>=60&&analyzeBookmakers(d.pmOdds).hasBet365).sort((a,b)=>b.maxVS-a.maxVS).slice(0,3);
 
   if(top3.length>0){
-    pmTop3.innerHTML=`<div class="pm-top3">
-      <div class="pm-top3-title">⭐ TOP WETTEN DES TAGES (Value-Score ≥60)</div>
+    pmTop3.innerHTML=bmSummary+`<div class="pm-top3">
+      <div class="pm-top3-title">⭐ TOP BET365 WETTEN DES TAGES (Value-Score ≥60)</div>
       ${top3.map(d=>{
         const bestSc=d.pmScenarios.sort((a,b)=>b.valueScore-a.valueScore)[0];
         const vsColor=valueScoreColor(bestSc.valueScore);
@@ -1010,15 +1125,15 @@ function renderPreMatch(data){
       }).join("")}
     </div>`;
   } else {
-    pmTop3.innerHTML="";
+    pmTop3.innerHTML=bmSummary;
   }
 
-  if(!data.length){
-    pmList.innerHTML=`<div class="pm-empty">Keine Daten geladen</div>`;
+  if(!filtered.length){
+    pmList.innerHTML=`<div class="pm-empty">Keine Spiele für diesen Filter</div>`;
     return;
   }
 
-  pmList.innerHTML=data.map(d=>{
+  pmList.innerHTML=filtered.map(d=>{
     const time=new Date(safeGet(d.fix,"fixture","date")||"").toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"});
     const league=safeGet(d.fix,"league","name")||"";
     const country=safeGet(d.fix,"league","country")||"";
@@ -1067,16 +1182,59 @@ function renderPreMatch(data){
       </div>`).join(""):
       `<div style="font-size:10px;color:#222;font-family:'JetBrains Mono',monospace;margin-top:6px">Keine starken Szenarien erkannt</div>`;
 
-    return`<div class="pm-card">
+    const bmInfo=analyzeBookmakers(d.pmOdds);
+    const bmBadge=bmInfo.hasBet365
+      ?`<span style="background:#052010;color:#22c55e;border:1px solid #22c55e33;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace">✓ Bet365</span>`
+      :bmInfo.bestAlternative
+        ?`<span style="background:#1a1205;color:#f59e0b;border:1px solid #f59e0b33;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace">⚠ Kein Bet365 · Alt: ${bmInfo.bestAlternative}</span>`
+        :`<span style="background:#111;color:#333;border:1px solid #222;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace">✗ Keine Quoten verfügbar</span>`;
+
+    const bet365OddsHtml=bmInfo.bet365Odds?`
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <div style="background:#111;border-radius:6px;padding:5px 10px;text-align:center">
+          <div style="font-size:9px;color:#333;font-family:'JetBrains Mono',monospace">HEIM</div>
+          <div style="font-size:15px;font-weight:900;font-family:'JetBrains Mono',monospace;color:${bmInfo.bet365Odds.home>=2?"#22c55e":bmInfo.bet365Odds.home>=1.5?"#f59e0b":"#aaa"}">${bmInfo.bet365Odds.home?.toFixed(2)||"–"}</div>
+        </div>
+        <div style="background:#111;border-radius:6px;padding:5px 10px;text-align:center">
+          <div style="font-size:9px;color:#333;font-family:'JetBrains Mono',monospace">UNENTSCH.</div>
+          <div style="font-size:15px;font-weight:900;font-family:'JetBrains Mono',monospace;color:${bmInfo.bet365Odds.draw>=2?"#22c55e":bmInfo.bet365Odds.draw>=1.5?"#f59e0b":"#aaa"}">${bmInfo.bet365Odds.draw?.toFixed(2)||"–"}</div>
+        </div>
+        <div style="background:#111;border-radius:6px;padding:5px 10px;text-align:center">
+          <div style="font-size:9px;color:#333;font-family:'JetBrains Mono',monospace">GAST</div>
+          <div style="font-size:15px;font-weight:900;font-family:'JetBrains Mono',monospace;color:${bmInfo.bet365Odds.away>=2?"#22c55e":bmInfo.bet365Odds.away>=1.5?"#f59e0b":"#aaa"}">${bmInfo.bet365Odds.away?.toFixed(2)||"–"}</div>
+        </div>
+      </div>`:"";
+
+    const fixId=safeGet(d.fix,"fixture","id");
+    const homeId=safeGet(d.fix,"teams","home","id");
+    const awayId=safeGet(d.fix,"teams","away","id");
+    const lid=safeGet(d.fix,"league","id");
+    const season=safeGet(d.fix,"league","season");
+
+    return`<div class="pm-card" style="${!bmInfo.hasBet365?"opacity:0.6":""}">
       <div class="pm-card-header">
-        <div class="pm-match-title">${d.homeName} vs ${d.awayName}</div>
-        <div class="pm-match-meta">${country} · ${league} · ${time} Uhr${d.maxVS>=60?` · <span style="color:#22c55e">Value ${d.maxVS}</span>`:""}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div>
+            <div class="pm-match-title">${d.homeName} vs ${d.awayName}</div>
+            <div class="pm-match-meta">${country} · ${league} · ${time} Uhr${d.maxVS>=60?` · <span style="color:#22c55e">Value ${d.maxVS}</span>`:""}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+            ${bmBadge}
+            <span class="standings-toggle" id="st-btn-${fixId}" onclick="toggleStandings(${fixId})">📊 Tabelle</span>
+            ${!bmInfo.hasBet365&&bmInfo.allNames.length?`<div style="font-size:9px;color:#2a2a2a;font-family:'JetBrains Mono',monospace">Verfügbar: ${bmInfo.allNames.slice(0,3).join(", ")}</div>`:""}
+          </div>
+        </div>
+        ${bet365OddsHtml}
       </div>
       <div class="pm-body">
         ${formHtml}
         ${injHtml}
         ${refHtml}
         ${scenariosHtml}
+      </div>
+      <div class="standings-wrap" id="st-${fixId}" data-lid="${lid}" data-season="${season}" data-hid="${homeId}" data-aid="${awayId}">
+        <div class="standings-title">TABELLE · ${league}</div>
+        <div class="standings-loading">Klicke "Tabelle" um zu laden</div>
       </div>
     </div>`;
   }).join("");
