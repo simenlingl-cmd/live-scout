@@ -932,19 +932,29 @@ async function loadPreMatch(){
   pmTop3.innerHTML="";pmList.innerHTML="";
 
   try{
-    const today=new Date().toISOString().split("T")[0];
-    const fixturesRes=await apiFetch(`/fixtures?date=${today}`);
+    // Use 'next' endpoint which has better CORS support than date-based queries
+    const fixturesRes=await apiFetch(`/fixtures?next=50`);
+    // Use local date to avoid UTC offset issues
+    const now=new Date();
+    const localToday=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+    const localDates=[];
+    for(let i=0;i<3;i++){
+      const d=new Date(now);d.setDate(d.getDate()+i);
+      localDates.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+    }
+
     const fixtures=(fixturesRes.response||[]).filter(f=>{
       const s=safeGet(f,"fixture","status","short");
-      return["NS","TBD"].includes(s);
+      // API date is in local time of the match location, extract date part
+      const fixtureDate=(safeGet(f,"fixture","date")||"").substring(0,10);
+      return["NS","TBD"].includes(s)&&localDates.includes(fixtureDate);
     });
 
     if(!fixtures.length){
-      pmStatus.innerHTML=`<div class="pm-empty">Keine anstehenden Spiele für heute</div>`;
+      pmStatus.innerHTML=`<div class="pm-empty">Keine anstehenden Spiele für die nächsten 3 Tage</div>`;
       return;
     }
-
-    pmStatus.innerHTML=`<div style="color:#3b82f6;font-family:'JetBrains Mono',monospace;font-size:12px;margin-bottom:12px"><span class="spin">⟳</span> ${fixtures.length} Spiele gefunden · Daten werden geladen...</div>`;
+    pmStatus.innerHTML=`<div style="color:#3b82f6;font-family:'JetBrains Mono',monospace;font-size:12px;margin-bottom:12px"><span class="spin">⟳</span> ${fixtures.length} Spiele (nächste 3 Tage) · Daten werden geladen...</div>`;
 
     const limited=fixtures.slice(0,20);
     const analyzed=await Promise.all(limited.map(async fix=>{
@@ -1205,8 +1215,14 @@ function renderPreMatch(data){
         </div>
       </div>`:"";
 
-    const fixId=safeGet(d.fix,"fixture","id");
-    const homeId=safeGet(d.fix,"teams","home","id");
+    const fixDate=(safeGet(d.fix,"fixture","date")||"").substring(0,10);
+    const nowLocal=new Date();
+    const localTodayStr=`${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,"0")}-${String(nowLocal.getDate()).padStart(2,"0")}`;
+    const localTomorrowDate=new Date(nowLocal);localTomorrowDate.setDate(localTomorrowDate.getDate()+1);
+    const localTomorrowStr=`${localTomorrowDate.getFullYear()}-${String(localTomorrowDate.getMonth()+1).padStart(2,"0")}-${String(localTomorrowDate.getDate()).padStart(2,"0")}`;
+    const isToday=fixDate===localTodayStr;
+    const isTomorrow=fixDate===localTomorrowStr;
+    const dayLabel=isToday?"Heute":isTomorrow?"Morgen":fixDate;
     const awayId=safeGet(d.fix,"teams","away","id");
     const lid=safeGet(d.fix,"league","id");
     const season=safeGet(d.fix,"league","season");
@@ -1216,7 +1232,7 @@ function renderPreMatch(data){
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <div>
             <div class="pm-match-title">${d.homeName} vs ${d.awayName}</div>
-            <div class="pm-match-meta">${country} · ${league} · ${time} Uhr${d.maxVS>=60?` · <span style="color:#22c55e">Value ${d.maxVS}</span>`:""}</div>
+            <div class="pm-match-meta">${country} · ${league} · ${dayLabel} ${time} Uhr${d.maxVS>=60?` · <span style="color:#22c55e">Value ${d.maxVS}</span>`:""}</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
             ${bmBadge}
