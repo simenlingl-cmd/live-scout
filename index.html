@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>⚡ Live Scout v13</title>
+  <title>⚡ Live Scout v14</title>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -924,7 +924,7 @@ function renderBookmakerSummary(data){
   </div>`;
 }
 
-
+async function loadPreMatch(){
   const pmStatus=document.getElementById("pm-status");
   const pmTop3=document.getElementById("pm-top3");
   const pmList=document.getElementById("pm-list");
